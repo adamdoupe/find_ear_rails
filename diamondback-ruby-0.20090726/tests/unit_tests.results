@@ -1,0 +1,57 @@
+..............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................F...FFFF.F..................................................................
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:15:expect succeed file profile/succeed/class_eval_with_block.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:954: [BUG] rb_gc_mark(): unknown data type 0x29(0xccb060) non object
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:13:expect succeed file profile/succeed/class_variable_set.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:953: [BUG] Segmentation fault
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:12:expect succeed file profile/succeed/const_get.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:955: [BUG] Segmentation fault
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:11:expect succeed file profile/succeed/const_set.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:955: [BUG] Segmentation fault
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:10:expect succeed file profile/succeed/const_set_var_target.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:954: [BUG] rb_gc_mark(): unknown data type 0x39(0x24ea2b0) non object
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+======================================================================
+Failure: Whole project test suite:3:Profile Suite:0:Type profile Progs:6:expect succeed file profile/succeed/instance_eval_add_method.rb
+
+[FATAL] /usr/lib/ruby/1.8/date/format.rb:954: [BUG] rb_gc_mark(): unknown data type 0x18(0x7f9e34043ea8) non object
+ruby 1.8.7 (2010-06-23 patchlevel 299) [x86_64-linux]
+
+: ruby process died by exception -1
+
+----------------------------------------------------------------------
+Ran: 938 tests in: 6.61 seconds.
+FAILED: Cases: 938 Tried: 938 Errors: 0 Failures: 6 Skip:0 Todo:0

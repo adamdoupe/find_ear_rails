@@ -1,0 +1,36 @@
+--- 
+method_missing: {}
+
+reflection: {}
+
+require: 
+  ? 
+    - /tmp/druby-adamd/initdc2437.rb
+    - 3
+    - require
+  : 
+    - - true
+      - /tmp/druby-adamd/command_line_requirese98b1f.rb
+      - true
+      - - ../lib
+        - .
+        - /usr/local/lib/site_ruby/1.8
+        - /usr/local/lib/site_ruby/1.8/x86_64-linux
+        - /usr/local/lib/site_ruby
+        - /usr/lib/ruby/vendor_ruby/1.8
+        - /usr/lib/ruby/vendor_ruby/1.8/x86_64-linux
+        - /usr/lib/ruby/vendor_ruby
+        - /usr/lib/ruby/1.8
+        - /usr/lib/ruby/1.8/x86_64-linux
+        - .
+
+eval: {}
+
+send: 
+  ? 
+    - /home/adamd/Dropbox/research/rails_ear/diamondback-ruby-0.20090726/tests/profile/fail/simple_send_usage_fail.rb
+    - 7
+    - send
+  : 
+    - f
+

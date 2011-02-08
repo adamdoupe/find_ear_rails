@@ -1,0 +1,43 @@
+diff -rupN diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/emitter.c diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/emitter.c
+--- diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/emitter.c	2009-04-12 17:51:25.000000000 -0700
++++ diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/emitter.c	2011-01-24 14:15:59.269301997 -0800
+@@ -36,7 +36,7 @@ value yamlEmitter_create(value unit)
+   CAMLreturn(em_v);
+ }
+ 
+-void caml_output_handler(SyckEmitter *e, char *ptr, long len)
++void caml_output_handler(SyckEmitter *e, const char *ptr, long len)
+ {
+   CAMLparam0();
+   CAMLlocal2(cb,buf);
+Binary files diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/emitter.o and diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/emitter.o differ
+Binary files diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/libyaml.a and diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/libyaml.a differ
+Binary files diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/OMakefile.omc and diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/OMakefile.omc differ
+diff -rupN diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/parser.c diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/parser.c
+--- diamondback-ruby-0.20090726/ocaml-syck-0.1.1//yaml/parser.c	2009-04-12 17:51:25.000000000 -0700
++++ diamondback-ruby-0.20090726.adam.patch/ocaml-syck-0.1.1//yaml/parser.c	2011-01-24 14:16:26.569302003 -0800
+@@ -59,7 +59,7 @@ static struct custom_operations parser_o
+ /* ---------------------------------------------------------------------- */
+ 
+ static void Noreturn
+-raise_error(char *msg)
++raise_error(const char *msg)
+ {
+     caml_raise_with_string(*caml_named_value("YamlParser_Error"), msg);
+ }
+@@ -189,13 +189,13 @@ parser_handler(SyckParser *parser, SyckN
+ }
+ 
+ static void Noreturn
+-error_handler(SyckParser *parser, char *msg)
++error_handler(SyckParser *parser, const char *msg)
+ {
+     raise_error(msg);
+ }
+ 
+ static SyckNode * Noreturn
+-bad_anchor_handler(SyckParser *parser, char *anchor)
++bad_anchor_handler(SyckParser *parser, const char *anchor)
+ {
+ #if defined(HAVE_SNPRINTF)
+     char buf[128];
