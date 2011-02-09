@@ -35,6 +35,23 @@ class propogateRedirectToReturnValue = object(self)
     | _ -> super#visit_stmt node
 end
 
+class removeFlashCalls = object(self)
+  inherit default_visitor as super
+
+  val mutable flash_vars = Hashtbl.create 10
+
+  method visit_stmt node = match node.snode with
+    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName("flash")})) -> Hashtbl.add flash_vars name true;
+      ChangeTo(update_stmt node (Expression(`ID_Nil)))
+    | MethodCall(_, ({mc_target = Some(`ID_Var(_, name)); mc_msg = `ID_Operator(Op_ASet)})) ->
+      begin try let _ = Hashtbl.find flash_vars name in
+		ChangeTo(update_stmt node (Expression(`ID_Nil)))
+	with Not_found -> super#visit_stmt node
+      end
+    | _ -> super#visit_stmt node
+      
+end
+
 module OrderedStmt = struct
   type t = stmt
   let compare stmt1 stmt2 = Pervasives.compare stmt1.sid stmt2.sid
@@ -94,6 +111,10 @@ let findEAR cfg =
       | Begin(stmt) -> findEAR stmt next
       | End(stmt) -> findEAR stmt next
       | Defined(_,stmt) -> findEAR stmt next
+
+	(* An expression with just nil doesn't do anything *)
+      | Expression `ID_Nil -> prev
+
 	(* A return or next doesn't count, and resets the after_redirect flag *)
       | Return _ 
       | Next _
@@ -108,7 +129,7 @@ let findEAR cfg =
       | Expression _
       | Assign _
       | Alias _
-1`	-> next
+	-> next
   in
   StmtSet.elements(fst(findEAR cfg (StmtSet.empty, None)))
 
@@ -120,7 +141,8 @@ let find_an_ear fname =
   let () = compute_cfg s in
   (* let () = compute_cfg_locals s in *)
   let s' = visit_stmt (new propogateRedirectToReturnValue :> cfg_visitor) s in
-  let ears = findEAR s' in
+  let s'' = visit_stmt (new removeFlashCalls :> cfg_visitor) s' in
+  let ears = findEAR s'' in
   let are_ears = (List.length ears != 0) in
   if are_ears then
     print_ears ears
