@@ -1,2 +1,11 @@
 *.omc
-.omakedb*
+*.omakedb*
+*.cmo
+*.run
+*.opt
+*.cma
+*rat_test
+*.o
+*.cmx
+*.a
+*.cmxa

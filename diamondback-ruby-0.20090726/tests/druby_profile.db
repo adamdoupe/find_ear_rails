@@ -5,12 +5,12 @@ reflection: {}
 
 require: 
   ? 
-    - /tmp/druby-adamd/initdc2437.rb
+    - /tmp/druby-adamd/initab8bf7.rb
     - 3
     - require
   : 
     - - true
-      - /tmp/druby-adamd/command_line_requirese98b1f.rb
+      - /tmp/druby-adamd/command_line_requires6576b4.rb
       - true
       - - ../lib
         - .
@@ -28,7 +28,7 @@ eval: {}
 
 send: 
   ? 
-    - /home/adamd/Dropbox/research/rails_ear/diamondback-ruby-0.20090726/tests/profile/fail/simple_send_usage_fail.rb
+    - /home/adamd/Dropbox/research/diamondback-ruby-0.20090726/tests/profile/fail/simple_send_usage_fail.rb
     - 7
     - send
   : 

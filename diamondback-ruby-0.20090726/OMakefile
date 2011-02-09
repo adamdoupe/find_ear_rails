@@ -2,8 +2,10 @@
 include config.omake
 
 VERSION=0.20090726
+BYTE_ENABLED = true
+#NATIVE_ENABLED = true
 
-OCAMLFLAGS += -dtypes
+OCAMLFLAGS += -dtypes -g
 
 #OCAMLOPTFLAGS += -p
 #OCAML_NATIVE_LINK_FLAGS += -p
@@ -20,7 +22,12 @@ if $(defined BISECT)
 
 .PHONY: install uninstall clean config
 
+FILES[] = dypgen-20070627/dyplib/dyp dypgen-20070627/dyplib/automaton dypgen-20070627/dyplib/gs dypgen-20070627/dyplib/priority_by_relation
+
 .SUBDIRS: src dypgen-20070627 ocaml-syck-0.1.1
+	include OMakefile
+	export FILES
+
 
 druby.conf: druby.conf.in :value: $(DRUBYLIB)
 	sed "s|@DRUBYLIB@|$(DRUBYLIB)|" druby.conf.in > druby.conf
@@ -61,6 +68,8 @@ build_gem: gem.configure src/druby src/safe_eval
 	cp gem.configure configure
 	gem build druby.gemspec
 
+
+.DEFAULT: $(OCamlLibrary libdruby, $(FILES))
 
 ALL_FILES = $`(ls R, .) #`
 ALL_TARGETS = $`(filter-targets $(ALL_FILES))) #`

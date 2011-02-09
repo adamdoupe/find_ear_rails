@@ -10,24 +10,21 @@ typeAnnotParser.ml typeAnnotParser.mli: typeAnnotParser.mly
   ocamlyacc typeAnnotParser.mly
 
 FILES[] +=
-   parser/typeAnnotParser
-   parser/typeAnnotLexer
-   parser/newParser
-   parser/newLexer
-   parser/rubyLexerState
-   parser/parse_helper
-   parser/ast
-   parser/ast_printer
-   parser/annotation
+	src/parser/typeAnnotParser
+	src/parser/typeAnnotLexer
+	src/parser/newParser
+	src/parser/newLexer
+	src/parser/rubyLexerState
+	src/parser/parse_helper
+	src/parser/ast
+	src/parser/ast_printer
+	src/parser/annotation
 
 TEST[] = 
    rat_test
 
 
 OCAML_OTHER_LIBS += nums str unix getopt
-OCAML_LIBS = $(DYP_LIB)/dyp ../druby
+OCAML_LIBS = $(DYP_LIB)/dyp 
 
-RAT_TEST = $(OCamlProgram rat_test, $(TEST))
-
-.DEFAULT: $(RAT_TEST)
 

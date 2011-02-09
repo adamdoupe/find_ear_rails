@@ -1,14 +1,14 @@
 
 FILES[] +=
-	dyn/yaml
-	dyn/dynamic
-	dyn/evals
-	dyn/send
-	dyn/mining
-	dyn/reflection
-	dyn/method_missing
-	dyn/require
-	dyn/dyn_builder
+	src/dyn/yaml
+	src/dyn/dynamic
+	src/dyn/evals
+	src/dyn/send
+	src/dyn/mining
+	src/dyn/reflection
+	src/dyn/method_missing
+	src/dyn/require
+	src/dyn/dyn_builder
 
 OCAMLINCLUDES += $(YAML_DIR) ../parser ../cfg  ..  
 

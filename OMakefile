@@ -1,21 +1,3 @@
-########################################################################
-# Permission is hereby granted, free of charge, to any person
-# obtaining a copy of this file, to deal in the File without
-# restriction, including without limitation the rights to use,
-# copy, modify, merge, publish, distribute, sublicense, and/or
-# sell copies of the File, and to permit persons to whom the
-# File is furnished to do so, subject to the following condition:
-#
-# THE FILE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE FILE OR
-# THE USE OR OTHER DEALINGS IN THE FILE.
-
-
-
 
 .PHONY: all install clean
 
@@ -31,8 +13,6 @@ if $(not $(OCAMLFIND_EXISTS))
     exit 1
 
 
-OCAMLINCLUDES += diamondback-ruby-0.20090726/src/cfg diamondback-ruby-0.20090726/src/dyn diamondback-ruby-0.20090726/src/parser diamondback-ruby-0.20090726/src/typing
-
 
 
 #
@@ -41,40 +21,25 @@ OCAMLINCLUDES += diamondback-ruby-0.20090726/src/cfg diamondback-ruby-0.20090726
 
 OCAMLFLAGS    += -dtypes -g
 
-FILES[] = find_rails_ear diamondback-ruby-0.20090726/src/cfg/cfg diamondback-ruby-0.20090726/src/parser/annotation diamondback-ruby-0.20090726/src/utils diamondback-ruby-0.20090726/src/visitor diamondback-ruby-0.20090726/src/log diamondback-ruby-0.20090726/src/config diamondback-ruby-0.20090726/src/build_vars diamondback-ruby-0.20090726/src/cfg/cfg_printer diamondback-ruby-0.20090726/src/cfg/file_loader diamondback-ruby-0.20090726/src/cfg/cfg_refactor diamondback-ruby-0.20090726/src/dQueue diamondback-ruby-0.20090726/src/parser/ast diamondback-ruby-0.20090726/src/parser/ast_printer diamondback-ruby-0.20090726/src/parser/parse_helper diamondback-ruby-0.20090726/src/cfg/dataflow diamondback-ruby-0.20090726/src/parser/newParser diamondback-ruby-0.20090726/src/parser/newLexer diamondback-ruby-0.20090726/src/parser/typeAnnotLexer diamondback-ruby-0.20090726/src/parser/typeAnnotParser diamondback-ruby-0.20090726/src/parser/rubyLexerState 
+FILES[] = find_rails_ear 
 
-.SUBDIRS: diamondback-ruby-0.20090726
-	include OMakefile
-	export FILES
-
-
-
-if $(defined BISECT)
-  OCAMLOPTFLAGS += -pp 'camlp4o $(BISECT)/instrument.cma'
-  export
-
-
+.SUBDIRS: diamondback-ruby-0.20090726 
 
 
 PROGRAM = find_rails_ear
 GETOPT_DIR=$(shell ocamlfind query getopt)
 OCAMLGRAPH_DIR=$(shell ocamlfind query ocamlgraph)
 
-OCAMLINCLUDES += diamondback-ruby-0.20090726/src/cfg diamondback-ruby-0.20090726/src/ diamondback-ruby-0.20090726/dypgen-20070627/dyplib diamondback-ruby-0.20090726/ocaml-syck-0.1.1/yaml $(GETOPT_DIR) $(OCAMLGRAPH_DIR)
-
-OCAMLDEP_MODULES_ENABLED = $(OCAMLDEP_MODULES_AVAILABLE)
-OCAMLDEP=$(OCAMLDEP_MODULES)
+OCAMLINCLUDES += diamondback-ruby-0.20090726/src/cfg diamondback-ruby-0.20090726/src/dyn diamondback-ruby-0.20090726/src/parser diamondback-ruby-0.20090726/src/typing diamondback-ruby-0.20090726/src/ $(GETOPT_DIR) $(OCAMLGRAPH_DIR) 
 
 
-OCAML_LIBS += diamondback-ruby-0.20090726/dypgen-20070627/dyplib/dyp
+OCAML_LIBS += diamondback-ruby-0.20090726/libdruby
 
 OCAML_OTHER_LIBS += nums unix str getopt graph
 # OCAML_CLIBS +=
 # OCAML_OTHER_LIBS +=
 # OCAML_LIB_FLAGS +=
 #
-
-
 
 .DEFAULT: $(OCamlProgram $(PROGRAM), $(FILES))
 

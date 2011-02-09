@@ -10,13 +10,13 @@ build_vars.ml: :value: $(SYSCONFDIR) $(VERSION)
 	echo "let sysconfdir = \"$(SYSCONFDIR)\"" >> $@
 	echo "let version = \"$(VERSION)\"" >> $@
 
-FILES[] = 
-	dQueue
-	log
-	utils
-	config
-	visitor
-	build_vars
+FILES[] += 
+	src/dQueue
+	src/log
+	src/utils
+	src/config
+	src/visitor
+	src/build_vars
 
 .SUBDIRS: dyn parser cfg typing
 	include OMakefile
@@ -45,4 +45,4 @@ install: $(DRUBY_PROG) $(SAFE_EVAL_PROG)
 uninstall:
 	rm -f $(BINDIR)/druby
 
-.DEFAULT: $(DRUBY_PROG) $(DRUBY_LIB) $(PRINT_PROG) $(SAFE_EVAL_PROG)
+

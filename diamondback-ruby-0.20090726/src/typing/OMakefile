@@ -30,12 +30,12 @@ constraintGraph.cmi constraintGraph.cmo: \
   $(OCamlC) -c $<
 
 FILES[] +=
-	typing/typing
-	typing/unify
-	typing/rType
-	typing/variable
-	typing/constraintGraph
-	typing/contracts
+	src/typing/typing
+	src/typing/unify
+	src/typing/rType
+	src/typing/variable
+	src/typing/constraintGraph
+	src/typing/contracts
 
 #TYPE_LIB = $(OCamlLibrary typing, $(FILES))
 
