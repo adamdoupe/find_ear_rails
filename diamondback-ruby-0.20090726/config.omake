@@ -63,8 +63,8 @@ static. =
 exit 1;;"" | ocaml -I $(OUNIT_DIR) unix.cma oUnit.cma)
         ConfMsgResult($(OUNIT_SUCCESSFUL))
 
-	DYP_LIB=$(ROOT)/dypgen-20070627/dyplib
-	DYPGEN=$(ROOT)/dypgen-20070627/generators/dypgen/dypgen
+	DYP_LIB=$(ROOT)/diamondback-ruby-0.20090726/dypgen-20070627/dyplib
+	DYPGEN=diamondback-ruby-0.20090726/$(ROOT)/dypgen-20070627/generators/dypgen/dypgen
 	# Check for syck.h for ocaml-syck
 	if $(CC)
 		# no-op just to force the gcc check before the syck.h check
@@ -77,7 +77,8 @@ exit 1;;"" | ocaml -I $(OUNIT_DIR) unix.cma oUnit.cma)
 		eprintln(Please install the syck library $"(libsyck0-dev on Debian)")
 		eprintln(or set it manually via 'omake --config SYCK=/path/to/syck')
 		exit 1
-	YAML_DIR=$(ROOT)/ocaml-syck-0.1.1/yaml
+	YAML_DIR=diamondback-ruby-0.20090726/$(ROOT)/ocaml-syck-0.1.1/yaml
+	YAML_LIB=$(ROOT)/diamondback-ruby-0.20090726/ocaml-syck-0.1.1/yaml
 
         # paths retrieved from Ruby
         $(CheckProg ruby)

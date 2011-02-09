@@ -10,5 +10,5 @@ FILES[] +=
 	src/dyn/require
 	src/dyn/dyn_builder
 
-OCAMLINCLUDES += $(YAML_DIR) ../parser ../cfg  ..  
+OCAMLINCLUDES += $(YAML_LIB) ../parser ../cfg  ..  
 

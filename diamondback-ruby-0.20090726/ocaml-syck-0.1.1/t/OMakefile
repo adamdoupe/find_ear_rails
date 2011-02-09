@@ -1,7 +1,7 @@
 
 
-OCAMLINCLUDES += $(YAML_DIR)
-OCAML_LIBS = $(YAML_DIR)/yaml
+OCAMLINCLUDES += $(YAML_LIB)
+OCAML_LIBS = $(YAML_LIB)/yaml
 
 YAMLSH = $(OCamlProgram yamlsh, yamlsh)
 

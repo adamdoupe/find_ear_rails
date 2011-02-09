@@ -22,9 +22,9 @@ if $(defined BISECT)
 
 .PHONY: install uninstall clean config
 
-FILES[] = dypgen-20070627/dyplib/dyp dypgen-20070627/dyplib/automaton dypgen-20070627/dyplib/gs dypgen-20070627/dyplib/priority_by_relation
+FILES[] = dypgen-20070627/generators/dypgen/dypgen dypgen-20070627/dyplib/dyp dypgen-20070627/dyplib/automaton dypgen-20070627/dyplib/gs dypgen-20070627/dyplib/priority_by_relation 
 
-.SUBDIRS: src dypgen-20070627 ocaml-syck-0.1.1
+.SUBDIRS: dypgen-20070627 src ocaml-syck-0.1.1
 	include OMakefile
 	export FILES
 
@@ -68,6 +68,8 @@ build_gem: gem.configure src/druby src/safe_eval
 	cp gem.configure configure
 	gem build druby.gemspec
 
+
+OCAML_LIBS += dypgen-20070627/generators/dypgen/dypgen
 
 .DEFAULT: $(OCamlLibrary libdruby, $(FILES))
 

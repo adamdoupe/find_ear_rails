@@ -9,3 +9,5 @@
 *.cmx
 *.a
 *.cmxa
+*.cmi
+*.annot
