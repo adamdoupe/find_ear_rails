@@ -167,9 +167,28 @@ let find_an_ear fname =
   else
     Printf.printf "No EARs found in %s.\n" (fname)
 
+let find_all_ears directory = 
+  let rec all_files directory = 
+    let dir_files = Array.to_list( Sys.readdir directory ) in
+    let with_full_path = List.map (Filename.concat directory) dir_files in    
+    let files = List.filter (fun x -> not(Sys.is_directory x)) with_full_path in
+    let directories = List.filter Sys.is_directory with_full_path in
+    let other_files = List.flatten( List.rev_map all_files directories) in
+    files @ other_files 
+  in 
+  let files = all_files (Filename.concat directory "/app/controllers/") in
+  let _ = List.map find_an_ear files in
+  ()
     
 
-let _ = 
-  let fname = Sys.argv.(1) in
-  find_an_ear fname; 
+let is_rails_directory directory = 
+  let controller_dir = Filename.concat directory "/app/controllers/" in
+  Sys.file_exists controller_dir && Sys.is_directory controller_dir
+
+let _ =   
+  let directory = Sys.argv.(1) in
+  if is_rails_directory(directory) then
+    find_all_ears directory
+  else  
+    Printf.eprintf "'%s' is not a valid rails directory" directory
 
