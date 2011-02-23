@@ -23,7 +23,7 @@ type after_redirect_return_val =
   | Anything
   | NoRedirect
 
-let string_from_after_redirect value = match value with
+let string_of_after_redirect value = match value with
   | True -> "Always returns true after redirect"
   | False -> "Always returns false after redirect"
   | Anything -> "Anything is possible after redirect"
@@ -382,7 +382,9 @@ let findEAR ?(redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg =
 
 let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
 
-let find_all_ears directory = 
+let print_redirects_return = StrMap.iter (fun str return_val -> Printf.printf "%s %s\n" str (string_of_after_redirect return_val))
+
+let find_all_ears directory verbose = 
   let rec all_files directory = 
     let dir_files = Array.to_list( Sys.readdir directory ) in
     let with_full_path = List.map (Filename.concat directory) dir_files in    
@@ -413,6 +415,8 @@ let find_all_ears directory =
     let return_values_with_redirect_to = StrMap.add "redirect_to" True return_values in
     redirects, return_values_with_redirect_to
   in
+  if verbose then
+    print_redirects_return application_redirects_return;
   let find_ear_controller fname = 
     try
       let loader = File_loader.create File_loader.EmptyCfg [] in 
@@ -444,9 +448,15 @@ let is_rails_directory directory =
 
 
 let _ =   
-  let directory = Sys.argv.(1) in
-  if is_rails_directory(directory) then
-    find_all_ears directory
+  let verbose = ref (false) in
+  let opts = [
+    ('v', "verbose", Some(fun () -> verbose := true), None)
+    ]
+  in
+  let directory = ref (".") in
+  Getopt.parse_cmdline opts (fun s -> directory := s);
+  if is_rails_directory(!directory) then
+    find_all_ears !directory !verbose
   else  
-    Printf.eprintf "'%s' is not a valid rails directory\n" directory
+    Printf.eprintf "'%s' is not a valid rails directory\n" !directory
 
