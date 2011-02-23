@@ -17,6 +17,123 @@ class removeDeadCode = object(self)
     | _ -> super#visit_stmt node
 end
 
+type after_redirect_return_val = 
+  | True
+  | False
+  | Anything
+  | NoRedirect
+
+let string_from_after_redirect value = match value with
+  | True -> "Always returns true after redirect"
+  | False -> "Always returns false after redirect"
+  | Anything -> "Anything is possible after redirect"
+  | NoRedirect -> "No redirect found"
+  
+
+let possible_return_val_after_redirect redirects cfg = 
+  let rec return_val_after_redirect stmt prev = 
+    let after_ear = fst(prev) in
+    let prev_return = snd(prev) in
+    let next = after_ear, prev_return in
+    let combine (after1, r1) (after2,r2) = 
+      let combine_after = after1 or after2 in
+      let combine_return = 
+	match r1, r2 with
+	  | NoRedirect, other 
+	  | other, NoRedirect -> other
+	  | True, True -> True
+	  | False, False -> False
+	  | _, _  -> Anything
+      in
+      combine_after, combine_return
+    in
+    let rec find_in_seq lst prev = match lst with 
+      | [] -> prev
+      | x :: xs -> find_in_seq xs (return_val_after_redirect x prev) in
+    match stmt.snode with    
+      | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
+	if StrSet.mem name redirects then 
+	  true, Anything
+	else
+	  begin
+	    match mc with
+	      | {mc_cb = Some( CB_Block(_, block))} -> return_val_after_redirect block next
+	      | _ -> next
+	  end
+      | Return(Some( `ID_Nil))
+      | Next(Some( `ID_Nil))
+      | Return(Some(`ID_False)) 
+      | Next(Some(`ID_False))
+      | Return(None) 
+      | Next(None) ->
+	if after_ear then
+	  false, False
+	else
+	  false, prev_return
+      | Return(Some( `ID_True)) 
+      | Next(Some( `ID_True)) ->
+	if after_ear then
+	  false, True
+	else
+	  false, prev_return
+      | Return _ 
+      | Next _ ->
+	if after_ear then
+	  false, Anything
+	else
+	  false, prev_return
+      | Seq lst -> find_in_seq lst next
+      | If(expr,if_true,if_false) -> combine (return_val_after_redirect if_true next) (return_val_after_redirect if_false next)
+      | Case({case_else=Some(stmt as block_else)} as block) -> combine (find_in_seq (List.map snd block.case_whens) next) (return_val_after_redirect block_else next)
+      | Case({case_else=None} as block) -> find_in_seq (List.map snd block.case_whens) next 
+      | While(expr, stmt) -> return_val_after_redirect stmt next
+      | For(_, _, stmt) -> return_val_after_redirect stmt next
+      (* This is for when we find a redirect_to call *)
+      | Module(_, _, stmt) -> return_val_after_redirect stmt (false, prev_return)
+      | Method(_, _, stmt) -> return_val_after_redirect stmt (false, prev_return)
+      | Class(_, _, stmt) -> return_val_after_redirect stmt (false, prev_return)
+      | ExnBlock block -> 
+	let e_else = match block.exn_else with
+	  | Some(stmt) -> [return_val_after_redirect stmt next]
+	  | None -> []
+	in
+	let e_ensure = match block.exn_ensure with
+	  | Some(stmt) -> [return_val_after_redirect stmt next]
+	  | None -> []
+	in
+	let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
+	let rescue_ears = List.map (fun stmt -> return_val_after_redirect stmt next) rescue_stmts in
+	List.fold_left combine prev ([return_val_after_redirect block.exn_body next] @ rescue_ears @ e_else @ e_ensure) 
+      | Begin(stmt) -> return_val_after_redirect stmt next
+      | End(stmt) -> return_val_after_redirect stmt next
+      | Defined(_,stmt) -> return_val_after_redirect stmt next
+
+      (* An expression with just nil doesn't do anything *)
+      | Expression `ID_Nil -> prev
+
+      | MethodCall(_,_) 
+      | Break _
+      | Redo
+      | Retry
+      | Undef _
+      | Yield _
+      | Expression _
+      | Assign _
+      | Alias _
+	-> next
+  in
+  let initial = (false, NoRedirect) in
+  let is_ear, result = return_val_after_redirect cfg initial in
+  result
+
+module OrderedStmt = struct
+  type t = stmt
+  let compare stmt1 stmt2 = Pervasives.compare stmt1.sid stmt2.sid
+  
+end
+
+module StmtMap = Map.Make(OrderedStmt) 
+
 let rec has_a_redirect_method methods stmt = 
   let combine stmts =
     List.fold_left (or) (false) (List.map (has_a_redirect_method methods) stmts) in
@@ -51,6 +168,29 @@ let rec has_a_redirect_method methods stmt =
 	
       | _ -> false
 
+class findAllPossibleReturnValuesForRedirects redirects = object(self)
+  inherit default_visitor as super
+    
+  val mutable redirect_map = StrMap.empty
+
+  method visit_stmt node = match node.snode with
+    | Method(Instance_Method(`ID_MethodName(name)), _, stmt)
+    | Method(Singleton_Method(_, `ID_MethodName(name)), _, stmt) -> 
+      if StrSet.mem name redirects then
+	begin
+	  redirect_map <- StrMap.add name (possible_return_val_after_redirect redirects stmt) redirect_map;
+	  SkipChildren
+	end
+      else
+	SkipChildren
+    | _ ->
+      super#visit_stmt node
+	
+
+  method redirect_map = redirect_map
+
+end
+
 
 class findRedirectReturnMethods initial_redirect_methods = object(self)
   inherit default_visitor as super
@@ -72,22 +212,42 @@ class findRedirectReturnMethods initial_redirect_methods = object(self)
 
 end
 
-class propogateRedirectToReturnValue = object(self)
+class propogateRedirectToReturnValue redirects = object(self)
   inherit default_visitor as super
 
+  val redirects = redirects
   val mutable true_values = Hashtbl.create 10
 
   method visit_stmt node = match node.snode with
-    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName("redirect_to")} as mc)) ->  Hashtbl.add true_values name true;
-      ChangeTo(update_stmt node (MethodCall(None, mc)))
-    | If(`ID_Var(_, name), if_true, if_false) ->       
-      begin try let _ = Hashtbl.find true_values name in
-	    ChangeTo(if_true)
+    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName(method_name)})) ->  
+      begin try let return_value = StrMap.find method_name redirects in
+		match return_value with
+		  | True -> Hashtbl.add true_values name true; super#visit_stmt node
+		  | False -> Hashtbl.add true_values name false; super#visit_stmt node
+		  | _ -> () ; super#visit_stmt node
 	with Not_found -> super#visit_stmt node
       end
-
+    | If(`ID_Var(_, name), if_true, if_false) ->       
+      begin try let return_value = Hashtbl.find true_values name in
+		match return_value with
+		  | true -> ChangeTo(if_true)
+		  | false -> ChangeTo(if_false)
+	with Not_found -> super#visit_stmt node
+      end
+    | Return(Some(`ID_Var(_, name))) ->
+      begin try let return_value = Hashtbl.find true_values name in
+		match return_value with
+		  | true -> ChangeTo(update_stmt node (Return(Some(`ID_True))))
+		  | false -> ChangeTo(update_stmt node (Return(Some(`ID_False))))
+	with Not_found -> super#visit_stmt node
+      end      
     | _ -> super#visit_stmt node
 end
+
+let find_all_redirect_return_value redirects cfg = 
+  let visitor = new findAllPossibleReturnValuesForRedirects (redirects) in
+  let _ = visit_stmt (visitor :> cfg_visitor) cfg in
+  visitor#redirect_map
 
 let find_all_redirects ?(initial_redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg = 
   let one_redirect_pass redirects = 
@@ -136,15 +296,6 @@ class removeSessionCalls = object(self)
       end
     | _ -> super#visit_stmt node
 end
-
-
-module OrderedStmt = struct
-  type t = stmt
-  let compare stmt1 stmt2 = Pervasives.compare stmt1.sid stmt2.sid
-  
-end
-
-module StmtMap = Map.Make(OrderedStmt) 
 
 let findEAR ?(redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg = 
   let rec findEAR stmt prev = 
@@ -225,22 +376,11 @@ let findEAR ?(redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg =
   in
   StmtSet.elements(fst(findEAR cfg (StmtSet.empty, None)))
 
-let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
 
-let find_an_ear fname = 
-  let loader = File_loader.create File_loader.EmptyCfg [] in
-  let s = File_loader.load_file loader fname in
-  let () = compute_cfg s in
-  (* let () = compute_cfg_locals s in *)
-  let s' = visit_stmt (new propogateRedirectToReturnValue :> cfg_visitor) s in
-  let s'' = visit_stmt (new removeFlashCalls :> cfg_visitor) s' in
-  let s''' = visit_stmt (new removeSessionCalls :> cfg_visitor) s'' in
-  let ears = findEAR s''' in
-  let are_ears = (List.length ears != 0) in
-  if are_ears then
-    print_ears ears
-  else
-    Printf.printf "No EARs found in %s.\n" (fname)
+
+
+
+let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
 
 let find_all_ears directory = 
   let rec all_files directory = 
@@ -264,27 +404,34 @@ let find_all_ears directory =
   in
   let controllers = List.filter (fun name -> (String.compare name app_controller_name) != 0) files in
 (* first, load the redirects from application_controller *)
-  let application_redirects = 
+  let application_redirects, application_redirects_return = 
     let loader = File_loader.create File_loader.EmptyCfg [] in
     let app_controller_cfg = File_loader.load_file loader app_controller_name in
     let () = compute_cfg app_controller_cfg in
-    find_all_redirects app_controller_cfg
+    let redirects = find_all_redirects app_controller_cfg in
+    let return_values = find_all_redirect_return_value redirects app_controller_cfg in
+    let return_values_with_redirect_to = StrMap.add "redirect_to" True return_values in
+    redirects, return_values_with_redirect_to
   in
-  
   let find_ear_controller fname = 
-    let loader = File_loader.create File_loader.EmptyCfg [] in 
-    let cfg = File_loader.load_file loader fname in
-    let () = compute_cfg cfg in
-    let all_redirects = find_all_redirects ~initial_redirects:application_redirects cfg in
-    let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue :> cfg_visitor) cfg in
-    let cfg_no_flash = visit_stmt (new removeFlashCalls :> cfg_visitor) cfg_prop_redirect in
-    let cfg_no_session = visit_stmt (new removeSessionCalls :> cfg_visitor) cfg_no_flash in
-    let ears = findEAR ~redirects:all_redirects cfg_no_session in
-    let are_ears = (List.length ears != 0) in
-    if are_ears then
-      print_ears ears
-    else
-      Printf.printf "No EARs found in %s.\n" (fname)
+    try
+      let loader = File_loader.create File_loader.EmptyCfg [] in 
+      let cfg = File_loader.load_file loader fname in
+      let () = compute_cfg cfg in
+      let all_redirects = find_all_redirects ~initial_redirects:application_redirects cfg in
+      let all_redirects_return_value = find_all_redirect_return_value all_redirects cfg in
+      let both_return_values = StrMap.fold StrMap.add application_redirects_return all_redirects_return_value in
+      let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue( both_return_values ) :> cfg_visitor) cfg in
+      let cfg_no_flash = visit_stmt (new removeFlashCalls :> cfg_visitor) cfg_prop_redirect in
+      let cfg_no_session = visit_stmt (new removeSessionCalls :> cfg_visitor) cfg_no_flash in
+      let ears = findEAR ~redirects:all_redirects cfg_no_session in
+      let are_ears = (List.length ears != 0) in
+      if are_ears then
+	print_ears ears
+      else
+	Printf.printf "No EARs found in %s.\n" (fname)
+    with _ ->
+      Printf.eprintf "Error while parsing %s.\n" (fname)
   in
   let _ = List.map find_ear_controller controllers in
   ()
