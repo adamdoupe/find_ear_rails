@@ -39,7 +39,7 @@ let string_of_after_redirect value = match value with
   | NoRedirect -> "No redirect found"
   
 
-let possible_return_val_after_redirect redirects cfg = 
+let possible_return_val_after_redirect ?(super=false) redirects cfg = 
   let rec return_val_after_redirect stmt prev = 
     let after_ear = fst(prev) in
     let prev_return = snd(prev) in
@@ -60,6 +60,11 @@ let possible_return_val_after_redirect redirects cfg =
       | [] -> prev
       | x :: xs -> find_in_seq xs (return_val_after_redirect x prev) in
     match stmt.snode with    
+      | MethodCall(_, ({mc_msg = `ID_Super})) ->
+	if super then
+	  true, Anything
+	else
+	  next
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
 	if is_redirect name redirects then 
 	  true, Anything
@@ -183,6 +188,11 @@ class findAllPossibleReturnValuesForRedirects redirects = object(self)
   val mutable redirect_map = redirects
 
   method visit_stmt node = match node.snode with
+    | Method(Instance_Method(`ID_MethodName("redirect_to" as name)), _, stmt) ->
+      begin
+	redirect_map <- StrMap.add name (possible_return_val_after_redirect ~super:true redirect_map stmt) redirect_map;
+	SkipChildren
+      end
     | Method(Instance_Method(`ID_MethodName(name)), _, stmt)
     | Method(Singleton_Method(_, `ID_MethodName(name)), _, stmt) -> 
       begin
@@ -197,34 +207,24 @@ class findAllPossibleReturnValuesForRedirects redirects = object(self)
 
 end
 
-
-class findRedirectReturnMethods initial_redirect_methods = object(self)
-  inherit default_visitor as super
-
-  val mutable redirect_methods = initial_redirect_methods
-
-  method visit_stmt node = match node.snode with
-    | Method(Instance_Method(`ID_MethodName(name)), _, stmt)
-    | Method(Singleton_Method(_, `ID_MethodName(name)), _, stmt) -> 
-      if (has_a_redirect_method redirect_methods stmt) then
-	redirect_methods <- (StrSet.add name redirect_methods)
-      else
-	()
-      ;
-      super#visit_stmt node
-    | _ -> super#visit_stmt node
-      
-  method redirect_methods = redirect_methods
-
-end
-
-class propogateRedirectToReturnValue redirects = object(self)
+class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(self)
   inherit default_visitor as super
 
   val redirects = redirects
   val mutable true_values = Hashtbl.create 10
 
   method visit_stmt node = match node.snode with
+    | Method(Instance_Method(`ID_MethodName("redirect_to")), _, stmt) -> 
+      let stmt' = visit_stmt ((new propogateRedirectToReturnValue ~in_redirect_to:true redirects) :> cfg_visitor) stmt in
+      ChangeTo(stmt')
+    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_Super})) ->
+      if in_redirect_to then
+	begin
+	  Hashtbl.add true_values name true; 
+	  super#visit_stmt node
+	end
+      else
+	super#visit_stmt node
     | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName(method_name)})) ->  
       begin try let return_value = StrMap.find method_name redirects in
 		match return_value with
@@ -274,22 +274,6 @@ let get_and_simplify_all_redirects cfg redirects =
   !next
       
   
-
-let find_all_redirects ?(initial_redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg = 
-  let one_redirect_pass redirects = 
-    let visitor = new findRedirectReturnMethods (redirects) in
-    let _ = visit_stmt (visitor :> cfg_visitor) cfg in
-    visitor#redirect_methods
-  in
-  let previous = ref( initial_redirects ) in
-  let next = ref (one_redirect_pass !previous) in
-  while (StrSet.compare !previous !next) != 0 do
-    previous := !next;
-    next := one_redirect_pass !previous
-  done;
-  !next
-
-
 class removeFlashCalls = object(self)
   inherit default_visitor as super
 
