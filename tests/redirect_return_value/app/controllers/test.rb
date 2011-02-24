@@ -90,5 +90,10 @@ class BugreportController < ApplicationController
   def no_explicit_return_always_true
     redirect_to url_for_group(@group)
   end
+
+  def explicit_plain_return
+    redirect_to "/yourmama"
+    return
+  end
 end
 

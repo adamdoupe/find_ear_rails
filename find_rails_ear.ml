@@ -23,6 +23,15 @@ type after_redirect_return_val =
   | Anything
   | NoRedirect
 
+let is_redirect name redirects = 
+  begin try let return_value = StrMap.find name redirects in
+	    match return_value with
+	      | NoRedirect -> false
+	      | _ -> true
+    with Not_found -> false
+  end
+
+
 let string_of_after_redirect value = match value with
   | True -> "Always returns true after redirect"
   | False -> "Always returns false after redirect"
@@ -52,7 +61,7 @@ let possible_return_val_after_redirect redirects cfg =
       | x :: xs -> find_in_seq xs (return_val_after_redirect x prev) in
     match stmt.snode with    
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
-	if StrSet.mem name redirects then 
+	if is_redirect name redirects then 
 	  true, Anything
 	else
 	  begin
@@ -171,18 +180,15 @@ let rec has_a_redirect_method methods stmt =
 class findAllPossibleReturnValuesForRedirects redirects = object(self)
   inherit default_visitor as super
     
-  val mutable redirect_map = StrMap.empty
+  val mutable redirect_map = redirects
 
   method visit_stmt node = match node.snode with
     | Method(Instance_Method(`ID_MethodName(name)), _, stmt)
     | Method(Singleton_Method(_, `ID_MethodName(name)), _, stmt) -> 
-      if StrSet.mem name redirects then
-	begin
-	  redirect_map <- StrMap.add name (possible_return_val_after_redirect redirects stmt) redirect_map;
-	  SkipChildren
-	end
-      else
+      begin
+	redirect_map <- StrMap.add name (possible_return_val_after_redirect redirect_map stmt) redirect_map;
 	SkipChildren
+      end
     | _ ->
       super#visit_stmt node
 	
@@ -249,6 +255,26 @@ let find_all_redirect_return_value redirects cfg =
   let _ = visit_stmt (visitor :> cfg_visitor) cfg in
   visitor#redirect_map
 
+
+let get_and_simplify_all_redirects cfg redirects =
+  let one_redirect_pass redirects cfg =
+      let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue( redirects ) :> cfg_visitor) cfg in
+      let new_redirects_visitor = new findAllPossibleReturnValuesForRedirects( redirects ) in
+      let _ = visit_stmt (new_redirects_visitor :> cfg_visitor) cfg_prop_redirect in
+      cfg_prop_redirect, new_redirects_visitor#redirect_map
+  in
+  let prev_cfg = ref(cfg) in
+  let prev_redirects = ref(redirects) in
+  let next = ref(one_redirect_pass !prev_redirects !prev_cfg) in
+  while (StrMap.compare (Pervasives.compare) (!prev_redirects) (snd(!next))) != 0 do
+    prev_cfg := fst(!next);
+    prev_redirects := snd(!next);
+    next := one_redirect_pass !prev_redirects !prev_cfg
+  done;
+  !next
+      
+  
+
 let find_all_redirects ?(initial_redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg = 
   let one_redirect_pass redirects = 
     let visitor = new findRedirectReturnMethods (redirects) in
@@ -297,7 +323,7 @@ class removeSessionCalls = object(self)
     | _ -> super#visit_stmt node
 end
 
-let findEAR ?(redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg = 
+let findEAR redirects cfg = 
   let rec findEAR stmt prev = 
     let ear_set = fst(prev) in
     let prev_ear = snd(prev) in
@@ -328,7 +354,7 @@ let findEAR ?(redirects=(StrSet.add "redirect_to" (StrSet.empty))) cfg =
       | For(_, _, stmt) -> findEAR stmt next
 	(* This is for when we find a redirect_to call *)
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
-	if StrSet.mem name redirects then 
+	if is_redirect name redirects then 
 	  fst(prev), Some(stmt)
 	else
 	  begin
@@ -406,29 +432,27 @@ let find_all_ears directory verbose =
   in
   let controllers = List.filter (fun name -> (String.compare name app_controller_name) != 0) files in
 (* first, load the redirects from application_controller *)
-  let application_redirects, application_redirects_return = 
+  let application_redirects = 
     let loader = File_loader.create File_loader.EmptyCfg [] in
     let app_controller_cfg = File_loader.load_file loader app_controller_name in
     let () = compute_cfg app_controller_cfg in
-    let redirects = find_all_redirects app_controller_cfg in
-    let return_values = find_all_redirect_return_value redirects app_controller_cfg in
-    let return_values_with_redirect_to = StrMap.add "redirect_to" True return_values in
-    redirects, return_values_with_redirect_to
+    let initial_redirect_map = StrMap.add "redirect_to" True (StrMap.empty) in
+    let _, all_return_values = get_and_simplify_all_redirects app_controller_cfg initial_redirect_map in
+    all_return_values
   in
   if verbose then
-    print_redirects_return application_redirects_return;
+    print_redirects_return application_redirects;
   let find_ear_controller fname = 
     try
       let loader = File_loader.create File_loader.EmptyCfg [] in 
       let cfg = File_loader.load_file loader fname in
       let () = compute_cfg cfg in
-      let all_redirects = find_all_redirects ~initial_redirects:application_redirects cfg in
-      let all_redirects_return_value = find_all_redirect_return_value all_redirects cfg in
-      let both_return_values = StrMap.fold StrMap.add application_redirects_return all_redirects_return_value in
-      let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue( both_return_values ) :> cfg_visitor) cfg in
+      let cfg_prop_redirect, both_return_values = get_and_simplify_all_redirects cfg application_redirects in
+      if verbose then
+	print_redirects_return both_return_values;
       let cfg_no_flash = visit_stmt (new removeFlashCalls :> cfg_visitor) cfg_prop_redirect in
       let cfg_no_session = visit_stmt (new removeSessionCalls :> cfg_visitor) cfg_no_flash in
-      let ears = findEAR ~redirects:all_redirects cfg_no_session in
+      let ears = findEAR both_return_values cfg_no_session in
       let are_ears = (List.length ears != 0) in
       if are_ears then
 	print_ears ears

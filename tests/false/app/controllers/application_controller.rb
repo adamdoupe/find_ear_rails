@@ -29,9 +29,5 @@ class ApplicationController < ActionController::Base
     flash[:notice] = message
     redirect_to destination_path and return
   end
-
-
-
-
 end
  
