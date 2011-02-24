@@ -214,9 +214,10 @@ class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(
   val mutable true_values = Hashtbl.create 10
 
   method visit_stmt node = match node.snode with
-    | Method(Instance_Method(`ID_MethodName("redirect_to")), _, stmt) -> 
-      let stmt' = visit_stmt ((new propogateRedirectToReturnValue ~in_redirect_to:true redirects) :> cfg_visitor) stmt in
-      ChangeTo(stmt')
+    | Method(Instance_Method(`ID_MethodName("redirect_to")), args, stmt) -> 
+      let stmt' = visit_stmt ((new propogateRedirectToReturnValue ~in_redirect_to:true  redirects) :> cfg_visitor) stmt in
+      let new_node = Method(Instance_Method(`ID_MethodName("redirect_to")), args, stmt') in
+      ChangeTo(update_stmt node new_node)
     | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_Super})) ->
       if in_redirect_to then
 	begin
@@ -258,10 +259,11 @@ let find_all_redirect_return_value redirects cfg =
 
 let get_and_simplify_all_redirects cfg redirects =
   let one_redirect_pass redirects cfg =
-      let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue( redirects ) :> cfg_visitor) cfg in
       let new_redirects_visitor = new findAllPossibleReturnValuesForRedirects( redirects ) in
-      let _ = visit_stmt (new_redirects_visitor :> cfg_visitor) cfg_prop_redirect in
-      cfg_prop_redirect, new_redirects_visitor#redirect_map
+      let _ = visit_stmt (new_redirects_visitor :> cfg_visitor) cfg in
+      let new_redirects = new_redirects_visitor#redirect_map in
+      let cfg_prop_redirect = visit_stmt (new propogateRedirectToReturnValue( new_redirects ) :> cfg_visitor) cfg in
+      cfg_prop_redirect, new_redirects
   in
   let prev_cfg = ref(cfg) in
   let prev_redirects = ref(redirects) in
@@ -394,6 +396,10 @@ let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear
 
 let print_redirects_return = StrMap.iter (fun str return_val -> Printf.printf "%s %s\n" str (string_of_after_redirect return_val))
 
+open Cfg_printer
+let print_cfg =   
+  CodePrinter.print_stmt stdout
+
 let find_all_ears directory verbose = 
   let rec all_files directory = 
     let dir_files = Array.to_list( Sys.readdir directory ) in
@@ -421,7 +427,9 @@ let find_all_ears directory verbose =
     let app_controller_cfg = File_loader.load_file loader app_controller_name in
     let () = compute_cfg app_controller_cfg in
     let initial_redirect_map = StrMap.add "redirect_to" True (StrMap.empty) in
-    let _, all_return_values = get_and_simplify_all_redirects app_controller_cfg initial_redirect_map in
+    let app_cfg, all_return_values = get_and_simplify_all_redirects app_controller_cfg initial_redirect_map in
+    if verbose then
+      print_cfg app_cfg;
     all_return_values
   in
   if verbose then
@@ -436,6 +444,8 @@ let find_all_ears directory verbose =
 	print_redirects_return both_return_values;
       let cfg_no_flash = visit_stmt (new removeFlashCalls :> cfg_visitor) cfg_prop_redirect in
       let cfg_no_session = visit_stmt (new removeSessionCalls :> cfg_visitor) cfg_no_flash in
+      if verbose then
+	print_cfg cfg_no_session;
       let ears = findEAR both_return_values cfg_no_session in
       let are_ears = (List.length ears != 0) in
       if are_ears then
