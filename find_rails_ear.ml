@@ -44,17 +44,17 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
     let after_ear = fst(prev) in
     let prev_return = snd(prev) in
     let next = after_ear, prev_return in
+    let combine_return  r1 r2 = 
+      match r1, r2 with
+	| NoRedirect, other 
+	| other, NoRedirect -> other
+	| True, True -> True
+	| False, False -> False
+	| _, _  -> Anything
+    in
     let combine (after1, r1) (after2,r2) = 
       let combine_after = after1 or after2 in
-      let combine_return = 
-	match r1, r2 with
-	  | NoRedirect, other 
-	  | other, NoRedirect -> other
-	  | True, True -> True
-	  | False, False -> False
-	  | _, _  -> Anything
-      in
-      combine_after, combine_return
+      combine_after, combine_return r1 r2
     in
     let rec find_in_seq lst prev = match lst with 
       | [] -> prev
@@ -62,12 +62,12 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
     match stmt.snode with    
       | MethodCall(_, ({mc_msg = `ID_Super})) ->
 	if super then
-	  true, Anything
+	  true, NoRedirect
 	else
 	  next
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
 	if is_redirect name redirects then 
-	  true, Anything
+	  true, NoRedirect
 	else
 	  begin
 	    match mc with
@@ -81,13 +81,13 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
       | Return(None) 
       | Next(None) ->
 	if after_ear then
-	  false, False
+	  false, combine_return prev_return False
 	else
 	  false, prev_return
       | Return(Some( `ID_True)) 
       | Next(Some( `ID_True)) ->
 	if after_ear then
-	  false, True
+	  false, combine_return prev_return True
 	else
 	  false, prev_return
       | Return _ 
@@ -139,48 +139,6 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
   let initial = (false, NoRedirect) in
   let is_ear, result = return_val_after_redirect cfg initial in
   result
-
-module OrderedStmt = struct
-  type t = stmt
-  let compare stmt1 stmt2 = Pervasives.compare stmt1.sid stmt2.sid
-  
-end
-
-module StmtMap = Map.Make(OrderedStmt) 
-
-let rec has_a_redirect_method methods stmt = 
-  let combine stmts =
-    List.fold_left (or) (false) (List.map (has_a_redirect_method methods) stmts) in
-  match stmt.snode with    
-    | MethodCall(_, {mc_target = None; mc_msg = `ID_MethodName(name)}) -> StrSet.mem name methods
-    | Seq lst -> combine lst
-    | If(expr,if_true,if_false) -> (has_a_redirect_method methods if_true) or (has_a_redirect_method methods if_false)
-    | Case({case_else=Some(stmt as block_else)} as block) -> (combine (List.map snd block.case_whens)) or (has_a_redirect_method methods block_else)
-    | Case({case_else=None} as block) -> combine (List.map snd block.case_whens)
-    | While(expr, stmt) -> has_a_redirect_method methods stmt
-    | For(_, _, stmt) -> has_a_redirect_method methods stmt
-    | MethodCall(_, {mc_cb = Some( CB_Block (params, block))}) -> has_a_redirect_method methods block
-    | Module(_, _, stmt) -> false
-    | Method(_, _, stmt) -> false
-    | Class(_, _, stmt) -> false
-    | ExnBlock block -> 
-      let e_else = match block.exn_else with
-	| Some(stmt) -> has_a_redirect_method methods stmt
-	| None -> false
-	in
-	let e_ensure = match block.exn_ensure with
-	  | Some(stmt) -> has_a_redirect_method methods stmt
-	  | None -> false
-	in
-	let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
-	let rescue_has_redirect = combine rescue_stmts in
-	(has_a_redirect_method methods block.exn_body) or rescue_has_redirect or e_else or e_ensure 
-      | Begin(stmt)
-      | End(stmt) 
-      | Defined(_,stmt) 
-	-> has_a_redirect_method methods stmt 
-	
-      | _ -> false
 
 class findAllPossibleReturnValuesForRedirects redirects = object(self)
   inherit default_visitor as super
