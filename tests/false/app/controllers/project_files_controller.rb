@@ -32,7 +32,7 @@ class ProjectFilesController < ApplicationController
       @parent_folder = ProjectFolder.find_by_id(params[:id])
       if params[:id].to_i > 0 && @parent_folder.nil?
         flash['notice'] = _('Unable to find parent folder.')
-        redirect_to :action => list
+        redirect_to :action => 'list'
         return
       end
 

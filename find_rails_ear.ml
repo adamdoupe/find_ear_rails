@@ -5,18 +5,6 @@ open Set
 open Cfg_refactor
 open Cfg_printer.ErrorPrinter
 
-class removeDeadCode = object(self)
-  inherit default_visitor as super
-
-  method visit_stmt node = match node.snode with
-    | If(`ID_True,if_true,if_false) -> ChangeTo(if_true)
-
-    | If(`ID_False,if_true,if_false)
-    | If(`ID_Nil,if_true,if_false) -> ChangeTo(if_false)
-
-    | _ -> super#visit_stmt node
-end
-
 type after_redirect_return_val = 
   | True
   | False
@@ -98,8 +86,15 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
 	  false, prev_return
       | Seq lst -> find_in_seq lst next
       | If(expr,if_true,if_false) -> combine (return_val_after_redirect if_true next) (return_val_after_redirect if_false next)
-      | Case({case_else=Some(stmt as block_else)} as block) -> combine (find_in_seq (List.map snd block.case_whens) next) (return_val_after_redirect block_else next)
-      | Case({case_else=None} as block) -> find_in_seq (List.map snd block.case_whens) next 
+      | Case({case_else=Some(stmt as block_else)} as block) -> 
+	let else_result = (return_val_after_redirect block_else next) in
+	let when_stmts = (List.map snd block.case_whens) in
+	let when_results = (List.map (fun stmt -> return_val_after_redirect stmt next) when_stmts) in
+	List.fold_left combine prev (when_results @ [else_result])
+      | Case({case_else=None} as block) -> 
+	let when_stmts = (List.map snd block.case_whens) in
+	let when_results = (List.map (fun stmt -> return_val_after_redirect stmt next) when_stmts) in
+	List.fold_left combine prev when_results
       | While(expr, stmt) -> return_val_after_redirect stmt next
       | For(_, _, stmt) -> return_val_after_redirect stmt next
       (* This is for when we find a redirect_to call *)
@@ -121,9 +116,6 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
       | Begin(stmt) -> return_val_after_redirect stmt next
       | End(stmt) -> return_val_after_redirect stmt next
       | Defined(_,stmt) -> return_val_after_redirect stmt next
-
-      (* An expression with just nil doesn't do anything *)
-      | Expression `ID_Nil -> prev
 
       | MethodCall(_,_) 
       | Break _
@@ -159,17 +151,15 @@ class findAllPossibleReturnValuesForRedirects redirects = object(self)
       end
     | _ ->
       super#visit_stmt node
-	
 
   method redirect_map = redirect_map
-
 end
 
 class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(self)
   inherit default_visitor as super
 
   val redirects = redirects
-  val mutable true_values = Hashtbl.create 10
+  val mutable variable_values = Hashtbl.create 10
 
   method visit_stmt node = match node.snode with
     | Method(Instance_Method(`ID_MethodName("redirect_to")), args, stmt) -> 
@@ -179,7 +169,7 @@ class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(
     | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_Super})) ->
       if in_redirect_to then
 	begin
-	  Hashtbl.add true_values name true; 
+	  Hashtbl.add variable_values name true; 
 	  super#visit_stmt node
 	end
       else
@@ -187,20 +177,39 @@ class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(
     | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName(method_name)})) ->  
       begin try let return_value = StrMap.find method_name redirects in
 		match return_value with
-		  | True -> Hashtbl.add true_values name true; super#visit_stmt node
-		  | False -> Hashtbl.add true_values name false; super#visit_stmt node
+		  | True -> Hashtbl.add variable_values name true; super#visit_stmt node
+		  | False -> Hashtbl.add variable_values name false; super#visit_stmt node
 		  | _ -> () ; super#visit_stmt node
 	with Not_found -> super#visit_stmt node
       end
     | If(`ID_Var(_, name), if_true, if_false) ->       
-      begin try let return_value = Hashtbl.find true_values name in
+      begin try let return_value = Hashtbl.find variable_values name in
 		match return_value with
 		  | true -> ChangeTo(if_true)
 		  | false -> ChangeTo(if_false)
 	with Not_found -> super#visit_stmt node
       end
+    | Assign(`ID_Var(_, new_name), `ID_Var(_, old_name)) ->
+      begin try let old_value = Hashtbl.find variable_values old_name in
+		let new_value = try Hashtbl.find variable_values new_name
+		  with Not_found -> old_value
+		in
+		let have_same_value = old_value == new_value in
+		if have_same_value then
+		  begin
+		    Hashtbl.add variable_values new_name old_value;
+		    ChangeTo(update_stmt node (Expression(`ID_Nil)))
+		  end
+		else
+		  begin
+		    Hashtbl.remove variable_values new_name;
+		    super#visit_stmt node
+		  end
+	with Not_found -> super#visit_stmt node
+      end
+
     | Return(Some(`ID_Var(_, name))) ->
-      begin try let return_value = Hashtbl.find true_values name in
+      begin try let return_value = Hashtbl.find variable_values name in
 		match return_value with
 		  | true -> ChangeTo(update_stmt node (Return(Some(`ID_True))))
 		  | false -> ChangeTo(update_stmt node (Return(Some(`ID_False))))
@@ -208,12 +217,6 @@ class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(
       end      
     | _ -> super#visit_stmt node
 end
-
-let find_all_redirect_return_value redirects cfg = 
-  let visitor = new findAllPossibleReturnValuesForRedirects (redirects) in
-  let _ = visit_stmt (visitor :> cfg_visitor) cfg in
-  visitor#redirect_map
-
 
 let get_and_simplify_all_redirects cfg redirects =
   let one_redirect_pass redirects cfg =
@@ -234,14 +237,21 @@ let get_and_simplify_all_redirects cfg redirects =
   !next
       
   
-class removeFlashCalls = object(self)
+class removeSettingFunctionCalls method_name = object(self)
   inherit default_visitor as super
-
+    
   val mutable flash_vars = Hashtbl.create 10
 
   method visit_stmt node = match node.snode with
-    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName("flash")})) -> Hashtbl.add flash_vars name true;
-      ChangeTo(update_stmt node (Expression(`ID_Nil)))
+    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName(method_call)})) -> 
+      if (Pervasives.compare method_call method_name) == 0 then
+	begin
+	  Hashtbl.add flash_vars name true;
+	  ChangeTo(update_stmt node (Expression(`ID_Nil)))
+	end
+      else
+	super#visit_stmt node
+
     | MethodCall(_, ({mc_target = Some(`ID_Var(_, name)); mc_msg = `ID_Operator(Op_ASet)})) ->
       begin try let _ = Hashtbl.find flash_vars name in
 		ChangeTo(update_stmt node (Expression(`ID_Nil)))
@@ -251,40 +261,17 @@ class removeFlashCalls = object(self)
       
 end
 
-class removeSessionCalls = object(self)
-  inherit default_visitor as super
-
-  val mutable session_vars = Hashtbl.create 10
-
-  method visit_stmt node = match node.snode with
-    | MethodCall(Some(`ID_Var(_, name)), ({mc_msg = `ID_MethodName("session")})) -> Hashtbl.add session_vars name true;
-      ChangeTo(update_stmt node (Expression(`ID_Nil)))
-    | MethodCall(_, ({mc_target = Some(`ID_Var(_, name)); mc_msg = `ID_Operator(Op_ASet)})) ->
-      begin try let _ = Hashtbl.find session_vars name in
-		ChangeTo(update_stmt node (Expression(`ID_Nil)))
-	with Not_found -> super#visit_stmt node
-      end
-    | _ -> super#visit_stmt node
-end
-
 let findEAR redirects cfg = 
   let rec findEAR stmt prev = 
     let ear_set = fst(prev) in
     let prev_ear = snd(prev) in
-    let add_ear set prev = match prev with
-      | None -> set
-      | Some(ear) -> StmtSet.add ear set in
     let combine r1 r2 = 
-      let combine_ear = match ((snd r1), (snd r2)) with
-	| Some(ear), _ 
-	| _, Some(ear)  
-	  -> Some(ear)
-	| None, None -> None in
+      let combine_ear = StmtSet.union (snd r1) (snd r2) in
       let combine_set = StmtSet.union (fst r1) (fst r2) in
       (combine_set, combine_ear)
     in
     
-    let next = (add_ear ear_set prev_ear), prev_ear in
+    let next = (StmtSet.union ear_set prev_ear), prev_ear in
 
     let rec find_in_seq lst prev = match lst with 
       | [] -> prev
@@ -292,23 +279,30 @@ let findEAR redirects cfg =
     match stmt.snode with    
       | Seq lst -> find_in_seq lst next
       | If(expr,if_true,if_false) -> combine (findEAR if_true next) (findEAR if_false next)
-      | Case({case_else=Some(stmt as block_else)} as block) -> combine (find_in_seq (List.map snd block.case_whens) next) (findEAR block_else next)
-      | Case({case_else=None} as block) -> find_in_seq (List.map snd block.case_whens) next 
+      | Case({case_else=Some(stmt as block_else)} as block) -> 
+	let else_result = (findEAR block_else next) in
+	let when_stmts = (List.map snd block.case_whens) in
+	let when_results = (List.map (fun stmt -> findEAR stmt next) when_stmts) in
+	List.fold_left combine (StmtSet.empty, StmtSet.empty) (when_results @ [else_result])
+      | Case({case_else=None} as block) -> 
+	let when_stmts = (List.map snd block.case_whens) in
+	let when_results = (List.map (fun stmt -> findEAR stmt next) when_stmts) in
+	List.fold_left combine (StmtSet.empty, StmtSet.empty) when_results
       | While(expr, stmt) -> findEAR stmt next
       | For(_, _, stmt) -> findEAR stmt next
 	(* This is for when we find a redirect_to call *)
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
 	if is_redirect name redirects then 
-	  fst(prev), Some(stmt)
+	  fst(next), StmtSet.add stmt prev_ear
 	else
 	  begin
 	    match mc with
 	      | {mc_cb = Some( CB_Block(_, block))} -> findEAR block next
 	      | _ -> next
 	  end
-      | Module(_, _, stmt) -> findEAR stmt (fst prev, None)
-      | Method(_, _, stmt) -> findEAR stmt (fst prev, None)
-      | Class(_, _, stmt) -> findEAR stmt (fst prev, None)
+      | Module(_, _, stmt) -> findEAR stmt (fst prev, StmtSet.empty)
+      | Method(_, _, stmt) -> findEAR stmt (fst prev, StmtSet.empty)
+      | Class(_, _, stmt) -> findEAR stmt (fst prev, StmtSet.empty)
       | ExnBlock block -> 
 	let e_else = match block.exn_else with
 	  | Some(stmt) -> [findEAR stmt next]
@@ -320,7 +314,7 @@ let findEAR redirects cfg =
 	in
 	let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
 	let rescue_ears = List.map (fun stmt -> findEAR stmt next) rescue_stmts in
-	List.fold_left combine (StmtSet.empty, None) ([findEAR block.exn_body next] @ rescue_ears @ e_else @ e_ensure) 
+	List.fold_left combine (StmtSet.empty, StmtSet.empty) ([findEAR block.exn_body next] @ rescue_ears @ e_else @ e_ensure) 
       | Begin(stmt) -> findEAR stmt next
       | End(stmt) -> findEAR stmt next
       | Defined(_,stmt) -> findEAR stmt next
@@ -331,7 +325,7 @@ let findEAR redirects cfg =
 	(* A return or next doesn't count, and resets the after_redirect flag *)
       | Return _ 
       | Next _
-	-> (fst prev, None)
+	-> (fst prev, StmtSet.empty)
 
       | MethodCall(_,_) 
       | Break _
@@ -344,7 +338,7 @@ let findEAR redirects cfg =
       | Alias _
 	-> next
   in
-  StmtSet.elements(fst(findEAR cfg (StmtSet.empty, None)))
+  StmtSet.elements(fst(findEAR cfg (StmtSet.empty, StmtSet.empty)))
 
 
 
@@ -393,15 +387,15 @@ let find_all_ears directory verbose =
   if verbose then
     print_redirects_return application_redirects;
   let find_ear_controller fname = 
-    try
+    try 
       let loader = File_loader.create File_loader.EmptyCfg [] in 
       let cfg = File_loader.load_file loader fname in
       let () = compute_cfg cfg in
       let cfg_prop_redirect, both_return_values = get_and_simplify_all_redirects cfg application_redirects in
       if verbose then
 	print_redirects_return both_return_values;
-      let cfg_no_flash = visit_stmt (new removeFlashCalls :> cfg_visitor) cfg_prop_redirect in
-      let cfg_no_session = visit_stmt (new removeSessionCalls :> cfg_visitor) cfg_no_flash in
+      let cfg_no_flash = visit_stmt ((new removeSettingFunctionCalls "flash")  :> cfg_visitor) cfg_prop_redirect in
+      let cfg_no_session = visit_stmt ((new removeSettingFunctionCalls "session")  :> cfg_visitor) cfg_no_flash in
       if verbose then
 	print_cfg cfg_no_session;
       let ears = findEAR both_return_values cfg_no_session in
@@ -411,7 +405,7 @@ let find_all_ears directory verbose =
       else
 	Printf.printf "No EARs found in %s.\n" (fname)
     with _ ->
-      Printf.eprintf "Error while parsing %s.\n" (fname)
+      Printf.eprintf "Error while parsing %s.\n" (fname) 
   in
   let _ = List.map find_ear_controller controllers in
   ()

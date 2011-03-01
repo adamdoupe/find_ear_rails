@@ -424,8 +424,9 @@ end  = struct
         stmt.succs <- succs;
         compute_cfg_succ body StmtSet.empty
 	  
-    | Undef _ | Break _ | Redo | Retry | Next _ -> 
-        Log.fixme "handle control op in successor computation"
+    | Undef _ | Break _ | Redo | Retry | Next _ -> ()
+      (* NOTE: Removing this because I don't use the successor computation *)
+      (* Log.fixme "handle control op in successor computation" *)
 
     (* These can't actually appear in a method *)
     | Begin(body)

@@ -3,6 +3,11 @@ class ApplicationController < ActionController::Base
   filter_parameter_logging :password, :password_confirmation
   helper_method :current_user_session, :current_user, :root_content_node
 
+  def redirect_with_flash(message, destination_path)
+    flash[:notice] = message
+    redirect_to destination_path and return
+  end
+
 
   def second_order
     redirect_back_or_default("something")
