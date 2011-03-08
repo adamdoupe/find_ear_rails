@@ -102,17 +102,28 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
       | Method(_, _, stmt) -> return_val_after_redirect stmt (false, prev_return)
       | Class(_, _, stmt) -> return_val_after_redirect stmt (false, prev_return)
       | ExnBlock block -> 
+	(* First, evaluate the body *)
+	let ears_in_body = return_val_after_redirect block.exn_body next in
+	(* else is after the body *)
 	let e_else = match block.exn_else with
-	  | Some(stmt) -> [return_val_after_redirect stmt next]
-	  | None -> []
+	  | Some(stmt) -> [return_val_after_redirect stmt ears_in_body]
+	  | None -> [ears_in_body]
 	in
-	let e_ensure = match block.exn_ensure with
-	  | Some(stmt) -> [return_val_after_redirect stmt next]
-	  | None -> []
-	in
+	(* rescue statements can execute after the body. Use that as input *)
 	let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
-	let rescue_ears = List.map (fun stmt -> return_val_after_redirect stmt next) rescue_stmts in
-	List.fold_left combine prev ([return_val_after_redirect block.exn_body next] @ rescue_ears @ e_else @ e_ensure) 
+	let rescue_ears = List.map (fun stmt -> return_val_after_redirect stmt ears_in_body) rescue_stmts in
+
+	(* ensure is called after the else and after each rescue statement *)
+	let e_ensure = 
+	  let inputs = e_else @ rescue_ears in
+	  match block.exn_ensure with
+	    | Some(stmt) -> 
+	      List.map (fun prev_ear -> return_val_after_redirect stmt prev_ear) inputs
+	    | None -> inputs
+	in
+
+	List.fold_left combine prev e_ensure
+
       | Begin(stmt) -> return_val_after_redirect stmt next
       | End(stmt) -> return_val_after_redirect stmt next
       | Defined(_,stmt) -> return_val_after_redirect stmt next
@@ -131,6 +142,68 @@ let possible_return_val_after_redirect ?(super=false) redirects cfg =
   let initial = (false, NoRedirect) in
   let is_ear, result = return_val_after_redirect cfg initial in
   result
+
+(* This class will look for any exception blocks with an ensure, wrap the 
+   body and each rescue in a new method. 
+ *)
+class createEnsureSemantics = object(self)
+  inherit default_visitor as super
+    
+  val mutable i = 0
+
+  method visit_stmt node = 
+    let unique_name name = 
+      i <- i + 1;
+      Printf.sprintf "__%s__%i" name i
+    in      
+
+    let create_new_function var_assign method_to_call pos = 
+      let mc = {mc_target = None; mc_msg = `ID_MethodName(method_to_call); mc_args = []; mc_cb = None} in
+      let snode = MethodCall(Some(`ID_Var(`Var_Local, var_assign)), mc) in
+      let stmt = mkstmt snode pos in
+      let seq = Seq([stmt]) in
+      mkstmt seq pos
+    in
+
+    let stmt_to_method stmt name = 
+      let stmt_node = Method( Instance_Method(`ID_MethodName(name)),[] , stmt) in
+      mkstmt stmt_node stmt.pos
+    in
+    let rec stmts_to_methods stmt_list name = match stmt_list with
+      | [] -> []
+      | x :: xs -> 
+	let u_name = unique_name name in
+	[(stmt_to_method x.rescue_body u_name, u_name, x.rescue_guards)] @ stmts_to_methods xs name
+    in
+    match node.snode with
+      | ExnBlock block -> 
+	begin
+	  match block.exn_ensure with
+	    | Some(ensure_stmt) -> 
+	      let body_name = unique_name "body" in
+	      let body_method = stmt_to_method block.exn_body body_name in
+	      let new_rescue_methods_guards = stmts_to_methods block.exn_rescue "rescue" in
+	      let tmp_return_name = unique_name "return_value" in
+	      let new_body = create_new_function tmp_return_name body_name node.pos in
+	      let new_rescues = List.map (fun (_, name,guards) -> {rescue_body = create_new_function tmp_return_name name node.pos; rescue_guards = guards}) new_rescue_methods_guards in
+	      let new_rescues_defs = List.map (fun (def, _, _) -> def) new_rescue_methods_guards in
+	      let new_block = { exn_body = new_body; exn_rescue = new_rescues; exn_else = block.exn_else; exn_ensure = block.exn_ensure } in
+	      
+	      let stmt_block = ExnBlock(new_block) in
+
+	      let new_node = mkstmt stmt_block node.pos in
+	      
+	      let final_return = Return(Some(`ID_Var(`Var_Local, tmp_return_name))) in
+	      let final_return_stmt = mkstmt final_return node.pos in
+
+	      let new_seq = Seq([body_method] @ new_rescues_defs @ [new_node] @ [final_return_stmt]) in
+	      ChangeTo(update_stmt node new_seq)
+		
+	    | None -> super#visit_stmt node
+	end
+      | _ ->
+      super#visit_stmt node
+end
 
 class findAllPossibleReturnValuesForRedirects redirects = object(self)
   inherit default_visitor as super
@@ -262,6 +335,7 @@ class removeSettingFunctionCalls method_name = object(self)
 end
 
 let findEAR redirects cfg = 
+  let returns_reset = ref(true) in
   let rec findEAR stmt prev = 
     let ear_set = fst(prev) in
     let prev_ear = snd(prev) in
@@ -290,7 +364,7 @@ let findEAR redirects cfg =
 	List.fold_left combine (StmtSet.empty, StmtSet.empty) when_results
       | While(expr, stmt) -> findEAR stmt next
       | For(_, _, stmt) -> findEAR stmt next
-	(* This is for when we find a redirect_to call *)
+      (* This is for when we find a redirect_to call *)
       | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
 	if is_redirect name redirects then 
 	  fst(next), StmtSet.add stmt prev_ear
@@ -304,28 +378,53 @@ let findEAR redirects cfg =
       | Method(_, _, stmt) -> findEAR stmt (fst prev, StmtSet.empty)
       | Class(_, _, stmt) -> findEAR stmt (fst prev, StmtSet.empty)
       | ExnBlock block -> 
-	let e_else = match block.exn_else with
-	  | Some(stmt) -> [findEAR stmt next]
-	  | None -> []
+	let eval_block_with_return returns_reset_value block = 
+	  let returns_reset_find_ear stmt next = 
+	    begin
+	      let prev_returns = !returns_reset in
+	      returns_reset := returns_reset_value;
+	      let result = findEAR stmt next in
+	      returns_reset := prev_returns;
+	      result
+	    end
+	  in
+	  (* First, evaluate the body *)
+	  let ears_in_body = returns_reset_find_ear block.exn_body next in
+	  (* else is after the body *)
+	  let e_else = match block.exn_else with
+	    | Some(stmt) -> [returns_reset_find_ear stmt ears_in_body]
+	    | None -> [ears_in_body]
+	  in
+	  (* rescue statements are executed seperately from body. Use that as input *)
+	  let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
+	  let rescue_ears = List.map (fun stmt -> returns_reset_find_ear stmt next) rescue_stmts in
+	  
+	  (* ensure is called after the else and after each rescue statement *)
+	  let e_ensure = 
+	    let inputs = e_else @ rescue_ears in
+	    match block.exn_ensure with
+	      | Some(stmt) -> 
+		List.map (fun prev_ear -> findEAR stmt prev_ear) inputs
+	      | None -> inputs
+	  in
+	  List.fold_left combine (StmtSet.empty, StmtSet.empty) e_ensure
 	in
-	let e_ensure = match block.exn_ensure with
-	  | Some(stmt) -> [findEAR stmt next]
-	  | None -> []
-	in
-	let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
-	let rescue_ears = List.map (fun stmt -> findEAR stmt next) rescue_stmts in
-	List.fold_left combine (StmtSet.empty, StmtSet.empty) ([findEAR block.exn_body next] @ rescue_ears @ e_else @ e_ensure) 
+	let block_for_ears = eval_block_with_return false block in
+	let block_next_ears = eval_block_with_return true block in
+	(fst block_for_ears, snd block_next_ears)
       | Begin(stmt) -> findEAR stmt next
       | End(stmt) -> findEAR stmt next
       | Defined(_,stmt) -> findEAR stmt next
 
-	(* An expression with just nil doesn't do anything *)
+      (* An expression with just nil doesn't do anything *)
       | Expression `ID_Nil -> prev
 
-	(* A return or next doesn't count, and resets the after_redirect flag *)
       | Return _ 
       | Next _
-	-> (fst prev, StmtSet.empty)
+	-> if !returns_reset then 
+	    (fst prev, StmtSet.empty) 
+	  else 
+	    prev
 
       | MethodCall(_,_) 
       | Break _
@@ -337,8 +436,8 @@ let findEAR redirects cfg =
       | Assign _
       | Alias _
 	-> next
-  in
-  StmtSet.elements(fst(findEAR cfg (StmtSet.empty, StmtSet.empty)))
+	in
+	StmtSet.elements(fst(findEAR cfg (StmtSet.empty, StmtSet.empty)))
 
 
 
@@ -377,6 +476,7 @@ let find_all_ears directory verbose =
   let application_redirects = 
     let loader = File_loader.create File_loader.EmptyCfg [] in
     let app_controller_cfg = File_loader.load_file loader app_controller_name in
+    (*let app_controller_cfg = visit_stmt (new createEnsureSemantics :> cfg_visitor) app_controller_cfg in *)
     let () = compute_cfg app_controller_cfg in
     let initial_redirect_map = StrMap.add "redirect_to" True (StrMap.empty) in
     let app_cfg, all_return_values = get_and_simplify_all_redirects app_controller_cfg initial_redirect_map in
@@ -391,6 +491,7 @@ let find_all_ears directory verbose =
       let loader = File_loader.create File_loader.EmptyCfg [] in 
       let cfg = File_loader.load_file loader fname in
       let () = compute_cfg cfg in
+      (*let cfg_fixed_ensure = visit_stmt (new createEnsureSemantics :> cfg_visitor) cfg in *)
       let cfg_prop_redirect, both_return_values = get_and_simplify_all_redirects cfg application_redirects in
       if verbose then
 	print_redirects_return both_return_values;
