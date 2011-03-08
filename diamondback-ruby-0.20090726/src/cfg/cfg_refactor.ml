@@ -352,7 +352,11 @@ let rec convert_to_return (add_f : tuple_expr -> stmt_node) acc stmt = match stm
       let convert_rescue rb = 
         {rb with rescue_body = q_to_stmt (convert_to_return add_f acc rb.rescue_body)}
       in
-      let body = q_to_stmt (convert_to_return add_f acc eb.exn_body) in
+      (* body doesn't return if there's an else stmt *)
+      let body = match eb.exn_else with
+	| Some(_) -> eb.exn_body
+	| None -> q_to_stmt (convert_to_return add_f acc eb.exn_body)
+      in
       let rescue = List.map convert_rescue eb.exn_rescue in
       let ensure = eb.exn_ensure in (* ensure doesn't return a value *)
       let eelse = map_opt q_to_stmt
