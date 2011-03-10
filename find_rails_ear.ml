@@ -26,30 +26,6 @@ let string_of_after_redirect value = match value with
   | Anything -> "Anything is possible after redirect"
   | NoRedirect -> "No redirect found"
 
-let evaluate_exn_block eval combine empty block initial = 
-  (* First, evaluate the body *)
-  let ears_in_body = eval block.exn_body initial in
-  (* else is after the body *)
-  let e_else = match block.exn_else with
-    | Some(stmt) -> [eval stmt ears_in_body]
-    | None -> [ears_in_body]
-  in
-  (* rescue statements are executed seperately from body. *)
-  let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
-  let rescue_eval = List.map (fun stmt -> eval stmt initial) rescue_stmts in
-	  
-  (* ensure is called after the else and after each rescue statement *)
-  let e_ensure = 
-    let inputs = e_else @ rescue_eval in
-    match block.exn_ensure with
-      | Some(stmt) -> 
-	List.map (fun prev -> eval stmt prev) inputs
-      | None -> inputs
-  in
-  List.fold_left combine empty e_ensure
-
-
-
 let possible_return_val_after_redirect ?(super=false) redirects cfg = 
   let rec return_val_after_redirect stmt prev = 
     let after_ear = fst(prev) in
@@ -350,13 +326,42 @@ let findEAR redirects cfg =
 	    result
 	  end
 	in
-	let block_for_ears = evaluate_exn_block (returns_reset_find_ear false) combine (StmtSet.empty, StmtSet.empty) block next in
-	let block_next_ears = evaluate_exn_block (returns_reset_find_ear true) combine (StmtSet.empty, StmtSet.empty) block next in
-	begin
-	  match block.exn_ensure with
-	    | Some(_) -> (fst block_for_ears, snd block_next_ears)
-	    | None -> block_next_ears
-	end
+
+	let eval_with_both stmt prev = 
+	  let first, _ = returns_reset_find_ear true stmt prev in
+	  let _, second = returns_reset_find_ear false stmt prev in
+	  first, second
+	in
+
+	let eval_block eval block = 
+	
+	  (* First, evaluate the body *)
+	  let evaled_body = eval block.exn_body prev in
+
+	  (* else is after the body *)
+	  let e_else = match block.exn_else with
+	    | Some(stmt) -> [eval stmt evaled_body]
+	    | None -> [evaled_body]
+	  in
+
+	  (* rescue statements are executed seperately from body. *)
+	  let rescue_stmts = List.map (fun rb -> rb.rescue_body) block.exn_rescue in
+	  let rescue_eval = List.map (fun stmt -> eval stmt prev) rescue_stmts in
+	  
+	  (* ensure is called after the else and after each rescue statement *)
+	  let e_ensure = 
+	    let inputs = e_else @ rescue_eval in
+	    match block.exn_ensure with
+	      | Some(stmt) -> 
+		List.map (fun prev -> findEAR stmt prev) inputs
+	      | None -> inputs
+	  in
+	  List.fold_left combine (StmtSet.empty, StmtSet.empty) e_ensure
+	in
+	let ears_found, _ = eval_block eval_with_both block in
+	let _, future_ears = eval_block findEAR block in
+	ears_found, future_ears
+
       | Begin(stmt) -> findEAR stmt next
       | End(stmt) -> findEAR stmt next
       | Defined(_,stmt) -> findEAR stmt next
@@ -383,9 +388,6 @@ let findEAR redirects cfg =
 	-> next
 	in
 	StmtSet.elements(fst(findEAR cfg (StmtSet.empty, StmtSet.empty)))
-
-
-
 
 
 let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
