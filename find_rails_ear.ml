@@ -11,6 +11,9 @@ type after_redirect_return_val =
   | Anything
   | NoRedirect
 
+
+
+
 let is_redirect name redirects = 
   begin try let return_value = StrMap.find name redirects in
 	    match return_value with
