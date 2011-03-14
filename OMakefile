@@ -21,7 +21,7 @@ if $(not $(OCAMLFIND_EXISTS))
 
 OCAMLFLAGS    += -dtypes -g
 
-FILES[] = find_rails_ear 
+FILES[] = find_rails_ear parse_ruby_methods
 
 .SUBDIRS: diamondback-ruby-0.20090726 
 

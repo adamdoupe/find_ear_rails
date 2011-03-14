@@ -4,15 +4,13 @@ open Utils
 open Set
 open Cfg_refactor
 open Cfg_printer.ErrorPrinter
+open Parse_ruby_methods
 
 type after_redirect_return_val = 
   | True
   | False
   | Anything
   | NoRedirect
-
-
-
 
 let is_redirect name redirects = 
   begin try let return_value = StrMap.find name redirects in
@@ -21,7 +19,6 @@ let is_redirect name redirects =
 	      | _ -> true
     with Not_found -> false
   end
-
 
 let string_of_after_redirect value = match value with
   | True -> "Always returns true after redirect"
@@ -470,14 +467,21 @@ let is_rails_directory directory =
 
 let _ =   
   let verbose = ref (false) in
+  let should_show_methods = ref (false) in
   let opts = [
-    ('v', "verbose", Some(fun () -> verbose := true), None)
+    ('v', "verbose", Some(fun () -> verbose := true), None);
+    ('m', "methods", Some(fun () -> should_show_methods := true), None)
     ]
   in
   let directory = ref (".") in
   Getopt.parse_cmdline opts (fun s -> directory := s);
-  if is_rails_directory(!directory) then
-    find_all_ears !directory !verbose
-  else  
-    Printf.eprintf "'%s' is not a valid rails directory\n" !directory
+  if !should_show_methods then
+    show_methods !directory
+  else
+    begin
+      if is_rails_directory(!directory) then
+	find_all_ears !directory !verbose
+      else  
+	Printf.eprintf "'%s' is not a valid rails directory\n" !directory
+    end
 
