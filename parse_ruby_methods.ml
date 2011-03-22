@@ -44,7 +44,7 @@ class find_all_methods = object(self)
 
   val mutable methods = RubyMethodSet.empty
   val mutable current_protection = Public
-  val mutable current_class = "__global__"
+  val mutable current_class = "Object"
 
   method visit_stmt node = match node.snode with
 
