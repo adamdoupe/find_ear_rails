@@ -273,19 +273,112 @@ class removeSettingFunctionCalls method_name = object(self)
       
 end
 
+module OrderedStmt = struct
+  type t = stmt
+  let compare stmt1 stmt2 = Pervasives.compare stmt1.sid stmt2.sid
+end
+
+module StmtMap = Map.Make(OrderedStmt)
+
+type ear = 
+  | Regular
+  | Severe of StmtSet.t
+
+let string_from_ear ear = match ear with
+  | Regular -> "Regular"
+  | Severe(_) -> "Severe"
+
+let combined_ears ear1 ear2 = match ear1,ear2 with
+  | Severe(stmts), Regular
+  | Regular, Severe(stmts)
+    -> Severe(stmts)
+  | Severe(stmts1), Severe(stmts2)
+    -> Severe(StmtSet.union stmts1 stmts2)
+  | Regular, Regular -> Regular
+
+type method_type = 
+  | ClassMethod
+  | InstanceMethod
+
+type severe_method = 
+  | Severe_Method of method_type * string
+
+let severe_methods = 
+  [Severe_Method(ClassMethod, "create"); Severe_Method(InstanceMethod, "update_attribute"); Severe_Method(InstanceMethod, "update_attributes");
+   Severe_Method(InstanceMethod, "attributes="); Severe_Method(InstanceMethod, "decrement"); Severe_Method(InstanceMethod, "decrement!"); 
+   Severe_Method(InstanceMethod, "delete"); Severe_Method(InstanceMethod, "destroy"); Severe_Method(InstanceMethod, "increment"); 
+   Severe_Method(InstanceMethod, "increment!"); Severe_Method(InstanceMethod, "save"); Severe_Method(InstanceMethod, "save!");
+   Severe_Method(InstanceMethod, "toggle"); Severe_Method(InstanceMethod, "toggle!"); Severe_Method(InstanceMethod, "touch");
+   Severe_Method(InstanceMethod, "update_attributes!");
+  ]
+
+let check_method method_call severe_method = 
+  let match_class_method method_call name = match method_call with
+    | { mc_target = Some(`ID_Var(`Var_Constant,_)); mc_msg = `ID_MethodName(method_name)} -> Pervasives.compare method_name name == 0
+    | _ -> false
+  in
+  let match_instance_method method_call name = match method_call with
+    | { mc_target = Some(`ID_Var(`Var_Local,_)); mc_msg = `ID_MethodName(method_name)}
+    | { mc_target = Some(`ID_Var(`Var_Instance,_)); mc_msg = `ID_MethodName(method_name)}
+    | { mc_target = Some(`ID_Var(`Var_Global,_)); mc_msg = `ID_MethodName(method_name)}
+    | { mc_target = Some(`ID_Var(`Var_Class,_)); mc_msg = `ID_MethodName(method_name)}
+      -> Pervasives.compare method_name name == 0
+    | _ -> false
+  in
+  match severe_method with
+    | Severe_Method(ClassMethod, name) -> match_class_method method_call name
+    | Severe_Method(InstanceMethod, name) -> match_instance_method method_call name
+
+let is_severe_method method_call = 
+  let any_matches = List.filter (fun severe_method -> check_method method_call severe_method) severe_methods in
+  List.length any_matches != 0
+
+
 let findEAR redirects cfg = 
   let returns_reset = ref(true) in
   let rec findEAR stmt prev = 
-    let ear_set = fst(prev) in
+    let ear_map = fst(prev) in
     let prev_ear = snd(prev) in
+    let combine_found_ears map1 map2 =
+      let result = ref(map2) in
+      let () = StmtMap.iter (fun stmt ear ->
+	begin
+	  let found_stmt = StmtMap.mem stmt map2 in
+	  if not found_stmt then
+	    result := StmtMap.add stmt ear !result
+	  else
+	    let map2ear = StmtMap.find stmt map2 in
+	    let combined_ears = combined_ears ear map2ear in
+	    result := StmtMap.add stmt combined_ears !result
+	end)
+	map1 
+      in
+      !result
+    in
+    let set_to_map set = 
+      let result = ref(StmtMap.empty) in
+      let () = StmtSet.iter (fun stmt -> result := StmtMap.add stmt Regular !result) set in
+      !result
+    in	
     let combine r1 r2 = 
       let combine_ear = StmtSet.union (snd r1) (snd r2) in
-      let combine_set = StmtSet.union (fst r1) (fst r2) in
-      (combine_set, combine_ear)
+      let map1,map2 = (fst r1),(fst r2) in
+      let found_ears = combine_found_ears map1 map2 in
+      (found_ears, combine_ear)
     in
-    
-    let next = (StmtSet.union ear_set prev_ear), prev_ear in
 
+    let next = (combine_found_ears ear_map (set_to_map prev_ear)), prev_ear in
+    let severe_next stmt = 
+      let result = ref(fst(next)) in
+      StmtSet.iter (fun ear ->
+	begin
+	  let prev_result = StmtMap.find ear !result in
+	  let new_result = Severe(StmtSet.add stmt StmtSet.empty) in
+	  let combined = combined_ears prev_result new_result  in
+	  result := StmtMap.add ear combined !result
+	end) prev_ear;
+      !result
+    in
     let rec find_in_seq lst prev = match lst with 
       | [] -> prev
       | x :: xs -> find_in_seq xs (findEAR x prev) in
@@ -296,18 +389,29 @@ let findEAR redirects cfg =
 	let else_result = (findEAR block_else next) in
 	let when_stmts = (List.map snd block.case_whens) in
 	let when_results = (List.map (fun stmt -> findEAR stmt next) when_stmts) in
-	List.fold_left combine (StmtSet.empty, StmtSet.empty) (when_results @ [else_result])
+	List.fold_left combine (StmtMap.empty, StmtSet.empty) (when_results @ [else_result])
       | Case({case_else=None} as block) -> 
 	let when_stmts = (List.map snd block.case_whens) in
 	let when_results = (List.map (fun stmt -> findEAR stmt next) when_stmts) in
-	List.fold_left combine (StmtSet.empty, StmtSet.empty) when_results
+	List.fold_left combine (StmtMap.empty, StmtSet.empty) when_results
       | While(expr, stmt) -> findEAR stmt next
       | For(_, _, stmt) -> findEAR stmt next
       (* This is for when we find a redirect_to call *)
-      | MethodCall(_, ({mc_target = None; mc_msg = `ID_MethodName(name)} as mc)) -> 
-	if is_redirect name redirects then 
+      | MethodCall(_, ({mc_target = target; mc_msg = `ID_MethodName(name)} as mc)) -> 
+	let is_redirect = is_redirect name redirects in
+	let no_target = target == None in
+	if is_redirect && no_target then 
 	  fst(next), StmtSet.add stmt prev_ear
 	else
+	  if is_severe_method mc then
+	    begin
+	      let new_ears = severe_next stmt in
+	      let new_next = new_ears, snd(next) in
+	      match mc with
+		| {mc_cb = Some( CB_Block(_, block))} -> findEAR block new_next
+		| _ -> new_next
+	    end
+	  else
 	  begin
 	    match mc with
 	      | {mc_cb = Some( CB_Block(_, block))} -> findEAR block next
@@ -356,7 +460,7 @@ let findEAR redirects cfg =
 		List.map (fun prev -> findEAR stmt prev) inputs
 	      | None -> inputs
 	  in
-	  List.fold_left combine (StmtSet.empty, StmtSet.empty) e_ensure
+	  List.fold_left combine (StmtMap.empty, StmtSet.empty) e_ensure
 	in
 	let ears_found, _ = eval_block eval_with_both block in
 	let _, future_ears = eval_block findEAR block in
@@ -387,10 +491,10 @@ let findEAR redirects cfg =
       | Alias _
 	-> next
 	in
-	StmtSet.elements(fst(findEAR cfg (StmtSet.empty, StmtSet.empty)))
+  fst(findEAR cfg (StmtMap.empty, StmtSet.empty))
 
 
-let print_ears = List.iter (fun ear -> Printf.printf "EAR found in %s:%d.\n" ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
+let print_ears = StmtMap.iter (fun ear ear_type -> Printf.printf "%s EAR found in %s:%d.\n" (string_from_ear ear_type) ear.pos.Lexing.pos_fname ear.pos.Lexing.pos_lnum)
 
 let print_redirects_return = StrMap.iter (fun str return_val -> Printf.printf "%s %s\n" str (string_of_after_redirect return_val))
 
@@ -423,7 +527,6 @@ let find_all_ears directory verbose =
   let application_redirects = 
     let loader = File_loader.create File_loader.EmptyCfg [] in
     let app_controller_cfg = File_loader.load_file loader app_controller_name in
-    (*let app_controller_cfg = visit_stmt (new createEnsureSemantics :> cfg_visitor) app_controller_cfg in *)
     let () = compute_cfg app_controller_cfg in
     let initial_redirect_map = StrMap.add "redirect_to" True (StrMap.empty) in
     let app_cfg, all_return_values = get_and_simplify_all_redirects app_controller_cfg initial_redirect_map in
@@ -438,7 +541,6 @@ let find_all_ears directory verbose =
       let loader = File_loader.create File_loader.EmptyCfg [] in 
       let cfg = File_loader.load_file loader fname in
       let () = compute_cfg cfg in
-      (*let cfg_fixed_ensure = visit_stmt (new createEnsureSemantics :> cfg_visitor) cfg in *)
       let cfg_prop_redirect, both_return_values = get_and_simplify_all_redirects cfg application_redirects in
       if verbose then
 	print_redirects_return both_return_values;
@@ -447,7 +549,7 @@ let find_all_ears directory verbose =
       if verbose then
 	print_cfg cfg_no_session;
       let ears = findEAR both_return_values cfg_no_session in
-      let are_ears = (List.length ears != 0) in
+      let are_ears = not (StmtMap.is_empty ears) in
       if are_ears then
 	print_ears ears
       else
