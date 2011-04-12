@@ -194,6 +194,17 @@ class propogateRedirectToReturnValue ?(in_redirect_to=false) redirects = object(
 		  | _ -> () ; super#visit_stmt node
 	with Not_found -> super#visit_stmt node
       end
+    (* This case is to handle the not function *)
+    | If(`ID_Var(_, name), {snode=Assign(`ID_Var(_, new_name_false), `ID_False)}, {snode=Assign(`ID_Var(_, new_name_true), `ID_True)}) ->
+      if new_name_false == new_name_true then
+	begin try let return_value = Hashtbl.find variable_values name in
+		  match return_value with
+		    | true -> Hashtbl.add variable_values new_name_false false; ChangeTo(update_stmt node (Expression(`ID_Nil)))
+		    | false -> Hashtbl.add variable_values new_name_false true; ChangeTo(update_stmt node (Expression(`ID_Nil)))
+	  with Not_found -> super#visit_stmt node
+	end 
+      else
+	super#visit_stmt node
     | If(`ID_Var(_, name), if_true, if_false) ->       
       begin try let return_value = Hashtbl.find variable_values name in
 		match return_value with
