@@ -21,12 +21,12 @@ if $(not $(OCAMLFIND_EXISTS))
 
 OCAMLFLAGS    += -dtypes -g
 
-FILES[] = find_rails_ear parse_ruby_methods stmt_printer
+FILES[] = find_ear_rails parse_ruby_methods stmt_printer
 
 .SUBDIRS: diamondback-ruby-0.20090726 
 
 
-PROGRAM = find_rails_ear
+PROGRAM = find_ear_rails
 GETOPT_DIR=$(shell ocamlfind query getopt)
 OCAMLGRAPH_DIR=$(shell ocamlfind query ocamlgraph)
 
