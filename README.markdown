@@ -12,16 +12,20 @@ paper in progress.
 These steps are for Ubuntu.
 
 First need the following packages:
-- ocaml
-- omake
-- ocaml-findlib
-- ocaml-libs
-- ocaml-native-compilers
-- ocaml-tools
-- libgetopt-ocaml-dev
-- libocamlgraph-ocaml-dev
-- libounit-ocaml-dev
-- libsyck (v 7.0) https://github.com/indeyets/syck
+
+* ocaml
+* omake
+* ocaml-findlib
+* ocaml-libs
+* ocaml-native-compilers
+* ocaml-tools
+* libgetopt-ocaml-dev
+* libocamlgraph-ocaml-dev
+* libounit-ocaml-dev
+
+And get and compile the following package:
+
+* libsyck (v 7.0) https://github.com/indeyets/syck
 
 Run:
     omake
