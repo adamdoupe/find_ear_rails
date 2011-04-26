@@ -5,7 +5,7 @@ bugs in Ruby on Rails applications. It was initially developed for a
 paper in progress.
 
 ## What is an EAR?
-[Bryce Boe][bboe-ear] (my co-author) has a good description on his blog, and I have [my own EAR explination][me-ear]. But here's the short version:
+[Bryce Boe][bboe-ear] (my co-author) has a good description on his blog, and I have [my own EAR explanation][me-ear]. But here's the short version:
 
 ## How to compile?
 
